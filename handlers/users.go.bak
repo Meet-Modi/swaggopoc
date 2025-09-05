@@ -1,0 +1,567 @@
+package handlers
+
+import (
+	"net/http"
+	"strconv"
+	"time"
+
+	"swaggo-poc/models"
+
+	"github.com/gin-gonic/gin"
+)
+
+// In-memory storage for demo purposes
+var users = []models.User{
+	{
+		ID:    1,
+		Name:  "Alice Johnson",
+		Email: "alice@example.com",
+		Address: models.Address{
+			Street:     "123 Oak Street",
+			City:       "San Francisco",
+			State:      "CA",
+			PostalCode: "94102",
+			Country:    "USA",
+		},
+		Contact: models.ContactInfo{
+			Phone:          "+1-555-123-4567",
+			AlternateEmail: "alice.alt@example.com",
+			Website:        "https://alicejohnson.dev",
+		},
+		Profile: models.Profile{
+			Bio:        "Senior Software Engineer specializing in backend development",
+			Avatar:     "https://example.com/avatars/alice.jpg",
+			Skills:     []string{"Go", "Python", "Kubernetes", "PostgreSQL"},
+			Experience: 8,
+		},
+		Preferences: models.Preferences{
+			Theme:    "dark",
+			Language: "en",
+			Notifications: models.NotificationSettings{
+				Email:     true,
+				SMS:       false,
+				Push:      true,
+				Marketing: false,
+			},
+			Privacy: models.PrivacySettings{
+				ProfileVisible: true,
+				ShowEmail:      false,
+				ShowPhone:      false,
+			},
+		},
+		CreatedAt: time.Now().AddDate(0, -6, 0),
+		UpdatedAt: time.Now().AddDate(0, -1, 0),
+	},
+	{
+		ID:    2,
+		Name:  "Bob Smith",
+		Email: "bob@example.com",
+		Address: models.Address{
+			Street:     "456 Pine Avenue",
+			City:       "Seattle",
+			State:      "WA",
+			PostalCode: "98101",
+			Country:    "USA",
+		},
+		Contact: models.ContactInfo{
+			Phone:   "+1-555-987-6543",
+			Website: "https://bobsmith.io",
+		},
+		Profile: models.Profile{
+			Bio:        "Full-stack developer with passion for React and Go",
+			Avatar:     "https://example.com/avatars/bob.jpg",
+			Skills:     []string{"React", "Go", "TypeScript", "MongoDB"},
+			Experience: 5,
+		},
+		Preferences: models.Preferences{
+			Theme:    "light",
+			Language: "en",
+			Notifications: models.NotificationSettings{
+				Email:     true,
+				SMS:       true,
+				Push:      false,
+				Marketing: true,
+			},
+			Privacy: models.PrivacySettings{
+				ProfileVisible: true,
+				ShowEmail:      true,
+				ShowPhone:      false,
+			},
+		},
+		CreatedAt: time.Now().AddDate(0, -3, 0),
+		UpdatedAt: time.Now().AddDate(0, 0, -15),
+	},
+}
+var nextID = 3
+
+// Helper functions for content negotiation
+func respondWithData(c *gin.Context, statusCode int, data interface{}) {
+	contentType := c.GetHeader("Accept")
+	if contentType == "application/xml" || contentType == "text/xml" {
+		c.XML(statusCode, data)
+	} else {
+		c.JSON(statusCode, data)
+	}
+}
+
+func respondWithError(c *gin.Context, statusCode int, errorMessage string) {
+	errorResponse := models.ErrorResponse{Error: errorMessage}
+	contentType := c.GetHeader("Accept")
+	if contentType == "application/xml" || contentType == "text/xml" {
+		c.XML(statusCode, errorResponse)
+	} else {
+		c.JSON(statusCode, errorResponse)
+	}
+}
+
+func bindRequestData(c *gin.Context, obj interface{}) error {
+	contentType := c.GetHeader("Content-Type")
+	if contentType == "application/xml" || contentType == "text/xml" {
+		return c.ShouldBindXML(obj)
+	}
+	return c.ShouldBindJSON(obj)
+}
+
+// GetUsers godoc
+// @Summary Get all users
+// @Description Get a list of all users
+// @Tags users
+// @Accept json,xml
+// @Produce json,xml
+// @Success 200 {array} models.User
+// @Success 200 {object} models.UserListResponse
+// @Router /users [get]
+func GetUsers(c *gin.Context) {
+	contentType := c.GetHeader("Accept")
+	if contentType == "application/xml" || contentType == "text/xml" {
+		response := models.UserListResponse{Users: users}
+		c.XML(http.StatusOK, response)
+	} else {
+		c.JSON(http.StatusOK, users)
+	}
+}
+
+// GetUser godoc
+// @Summary Get a user by ID
+// @Description Get a single user by their ID
+// @Tags users
+// @Accept json,xml
+// @Produce json,xml
+// @Param id path int true "User ID"
+// @Success 200 {object} models.User
+// @Failure 404 {object} models.ErrorResponse
+// @Router /users/{id} [get]
+func GetUser(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	for _, user := range users {
+		if user.ID == id {
+			respondWithData(c, http.StatusOK, user)
+			return
+		}
+	}
+
+	respondWithError(c, http.StatusNotFound, "User not found")
+}
+
+// CreateUser godoc
+// @Summary Create a new user
+// @Description Create a new user with the provided information including nested address, contact, profile, and preferences
+// @Tags users
+// @Accept json,xml
+// @Produce json,xml
+// @Param user body models.CreateUserRequest true "User information with nested structures"
+// @Success 201 {object} models.User
+// @Failure 400 {object} models.ErrorResponse
+// @Router /users [post]
+func CreateUser(c *gin.Context) {
+	var req models.CreateUserRequest
+	if err := bindRequestData(c, &req); err != nil {
+		respondWithError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Set default values for preferences if not provided
+	if req.Preferences.Theme == "" {
+		req.Preferences.Theme = "light"
+	}
+	if req.Preferences.Language == "" {
+		req.Preferences.Language = "en"
+	}
+
+	user := models.User{
+		ID:          nextID,
+		Name:        req.Name,
+		Email:       req.Email,
+		Address:     req.Address,
+		Contact:     req.Contact,
+		Profile:     req.Profile,
+		Preferences: req.Preferences,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	nextID++
+
+	users = append(users, user)
+	respondWithData(c, http.StatusCreated, user)
+}
+
+// UpdateUser godoc
+// @Summary Update a user
+// @Description Update an existing user with the provided information. All nested structures can be partially updated
+// @Tags users
+// @Accept json,xml
+// @Produce json,xml
+// @Param id path int true "User ID"
+// @Param user body models.UpdateUserRequest true "Updated user information with nested structures"
+// @Success 200 {object} models.User
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 404 {object} models.ErrorResponse
+// @Router /users/{id} [put]
+func UpdateUser(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	var req models.UpdateUserRequest
+	if err := bindRequestData(c, &req); err != nil {
+		respondWithError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	for i, user := range users {
+		if user.ID == id {
+			// Update basic fields
+			if req.Name != "" {
+				users[i].Name = req.Name
+			}
+			if req.Email != "" {
+				users[i].Email = req.Email
+			}
+
+			// Update nested Address
+			if req.Address != nil {
+				if req.Address.Street != "" {
+					users[i].Address.Street = req.Address.Street
+				}
+				if req.Address.City != "" {
+					users[i].Address.City = req.Address.City
+				}
+				if req.Address.State != "" {
+					users[i].Address.State = req.Address.State
+				}
+				if req.Address.PostalCode != "" {
+					users[i].Address.PostalCode = req.Address.PostalCode
+				}
+				if req.Address.Country != "" {
+					users[i].Address.Country = req.Address.Country
+				}
+			}
+
+			// Update nested Contact
+			if req.Contact != nil {
+				if req.Contact.Phone != "" {
+					users[i].Contact.Phone = req.Contact.Phone
+				}
+				if req.Contact.AlternateEmail != "" {
+					users[i].Contact.AlternateEmail = req.Contact.AlternateEmail
+				}
+				if req.Contact.Website != "" {
+					users[i].Contact.Website = req.Contact.Website
+				}
+			}
+
+			// Update nested Profile
+			if req.Profile != nil {
+				if req.Profile.Bio != "" {
+					users[i].Profile.Bio = req.Profile.Bio
+				}
+				if req.Profile.Avatar != "" {
+					users[i].Profile.Avatar = req.Profile.Avatar
+				}
+				if req.Profile.Skills != nil {
+					users[i].Profile.Skills = req.Profile.Skills
+				}
+				if req.Profile.Experience != 0 {
+					users[i].Profile.Experience = req.Profile.Experience
+				}
+			}
+
+			// Update nested Preferences
+			if req.Preferences != nil {
+				if req.Preferences.Theme != "" {
+					users[i].Preferences.Theme = req.Preferences.Theme
+				}
+				if req.Preferences.Language != "" {
+					users[i].Preferences.Language = req.Preferences.Language
+				}
+				// Update notification settings if provided
+				users[i].Preferences.Notifications.Email = req.Preferences.Notifications.Email
+				users[i].Preferences.Notifications.SMS = req.Preferences.Notifications.SMS
+				users[i].Preferences.Notifications.Push = req.Preferences.Notifications.Push
+				users[i].Preferences.Notifications.Marketing = req.Preferences.Notifications.Marketing
+
+				// Update privacy settings if provided
+				users[i].Preferences.Privacy.ProfileVisible = req.Preferences.Privacy.ProfileVisible
+				users[i].Preferences.Privacy.ShowEmail = req.Preferences.Privacy.ShowEmail
+				users[i].Preferences.Privacy.ShowPhone = req.Preferences.Privacy.ShowPhone
+			}
+
+			// Update timestamp
+			users[i].UpdatedAt = time.Now()
+
+			respondWithData(c, http.StatusOK, users[i])
+			return
+		}
+	}
+
+	respondWithError(c, http.StatusNotFound, "User not found")
+}
+
+// DeleteUser godoc
+// @Summary Delete a user
+// @Description Delete a user by their ID
+// @Tags users
+// @Accept json,xml
+// @Produce json,xml
+// @Param id path int true "User ID"
+// @Success 200 {object} models.SuccessResponse
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 404 {object} models.ErrorResponse
+// @Router /users/{id} [delete]
+func DeleteUser(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	for i, user := range users {
+		if user.ID == id {
+			users = append(users[:i], users[i+1:]...)
+			respondWithData(c, http.StatusOK, models.SuccessResponse{Message: "User deleted successfully"})
+			return
+		}
+	}
+
+	respondWithError(c, http.StatusNotFound, "User not found")
+}
+
+// HealthCheck godoc
+// @Summary Health check
+// @Description Check if the API is running
+// @Tags health
+// @Accept json,xml
+// @Produce json,xml
+// @Success 200 {object} models.SuccessResponse
+// @Router /health [get]
+func HealthCheck(c *gin.Context) {
+	respondWithData(c, http.StatusOK, models.SuccessResponse{Message: "API is running"})
+}
+
+// GetUserAddress godoc
+// @Summary Get user's address
+// @Description Get the address information for a specific user
+// @Tags users
+// @Accept json,xml
+// @Produce json,xml
+// @Param id path int true "User ID"
+// @Success 200 {object} models.Address
+// @Failure 404 {object} models.ErrorResponse
+// @Router /users/{id}/address [get]
+func GetUserAddress(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	for _, user := range users {
+		if user.ID == id {
+			respondWithData(c, http.StatusOK, user.Address)
+			return
+		}
+	}
+
+	respondWithError(c, http.StatusNotFound, "User not found")
+}
+
+// UpdateUserAddress godoc
+// @Summary Update user's address
+// @Description Update the address information for a specific user
+// @Tags users
+// @Accept json,xml
+// @Produce json,xml
+// @Param id path int true "User ID"
+// @Param address body models.Address true "Address information"
+// @Success 200 {object} models.Address
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 404 {object} models.ErrorResponse
+// @Router /users/{id}/address [put]
+func UpdateUserAddress(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	var req models.Address
+	if err := bindRequestData(c, &req); err != nil {
+		respondWithError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	for i, user := range users {
+		if user.ID == id {
+			users[i].Address = req
+			users[i].UpdatedAt = time.Now()
+			respondWithData(c, http.StatusOK, users[i].Address)
+			return
+		}
+	}
+
+	respondWithError(c, http.StatusNotFound, "User not found")
+}
+
+// GetUserPreferences godoc
+// @Summary Get user's preferences
+// @Description Get the preferences for a specific user
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param id path int true "User ID"
+// @Success 200 {object} models.Preferences
+// @Failure 404 {object} models.ErrorResponse
+// @Router /users/{id}/preferences [get]
+func GetUserPreferences(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	for _, user := range users {
+		if user.ID == id {
+			c.JSON(http.StatusOK, user.Preferences)
+			return
+		}
+	}
+
+	c.JSON(http.StatusNotFound, models.ErrorResponse{Error: "User not found"})
+}
+
+// UpdateUserPreferences godoc
+// @Summary Update user's preferences
+// @Description Update the preferences for a specific user
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param id path int true "User ID"
+// @Param preferences body models.Preferences true "User preferences"
+// @Success 200 {object} models.Preferences
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 404 {object} models.ErrorResponse
+// @Router /users/{id}/preferences [put]
+func UpdateUserPreferences(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	var req models.Preferences
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	for i, user := range users {
+		if user.ID == id {
+			users[i].Preferences = req
+			users[i].UpdatedAt = time.Now()
+			c.JSON(http.StatusOK, users[i].Preferences)
+			return
+		}
+	}
+
+	c.JSON(http.StatusNotFound, models.ErrorResponse{Error: "User not found"})
+}
+
+// GetUserProfile godoc
+// @Summary Get user's profile
+// @Description Get the profile information for a specific user
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param id path int true "User ID"
+// @Success 200 {object} models.Profile
+// @Failure 404 {object} models.ErrorResponse
+// @Router /users/{id}/profile [get]
+func GetUserProfile(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	for _, user := range users {
+		if user.ID == id {
+			c.JSON(http.StatusOK, user.Profile)
+			return
+		}
+	}
+
+	c.JSON(http.StatusNotFound, models.ErrorResponse{Error: "User not found"})
+}
+
+// UpdateUserProfile godoc
+// @Summary Update user's profile
+// @Description Update the profile information for a specific user
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param id path int true "User ID"
+// @Param profile body models.Profile true "User profile"
+// @Success 200 {object} models.Profile
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 404 {object} models.ErrorResponse
+// @Router /users/{id}/profile [put]
+func UpdateUserProfile(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(c, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	var req models.Profile
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	for i, user := range users {
+		if user.ID == id {
+			users[i].Profile = req
+			users[i].UpdatedAt = time.Now()
+			c.JSON(http.StatusOK, users[i].Profile)
+			return
+		}
+	}
+
+	c.JSON(http.StatusNotFound, models.ErrorResponse{Error: "User not found"})
+}
